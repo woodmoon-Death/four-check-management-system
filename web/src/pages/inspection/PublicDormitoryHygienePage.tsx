@@ -17,7 +17,8 @@ const results={EXCELLENT:'优秀',QUALIFIED:'合格',UNQUALIFIED:'不合格'}
 export function PublicDormitoryHygienePage() {
  const {user}=useAuth(),permissions=useAttendancePermissions()
  const form=useRef<ProFormInstance>(undefined)
- const [filters,setFilters]=useState<InspectionQuery>({page:1,pageSize:20})
+ const [selectedGrade,setSelectedGrade]=useState('')
+ const [filters,setFilters]=useState<InspectionQuery>({page:1,pageSize:20,sort:'occurredAtDesc'})
  const [semester,setSemester]=useState<string>()
  const [creating,setCreating]=useState(false)
  const [panel,setPanel]=useState<{id:string;mode:'detail'|'edit'}>()
@@ -27,19 +28,23 @@ export function PublicDormitoryHygienePage() {
  const weeks=useInspectionContext({purpose:'view',kind:'weeks',semesterId:semester},!!semester)
  const departments=useInspectionContext({purpose:'view',kind:'departments'})
  const classes=useInspectionContext({purpose:'view',kind:'classes'})
+ const grades=useInspectionContext({purpose:'view',kind:'grades'})
  const inspectionTypeId=semesters.data?.inspectionTypeId
  const records=usePublicDormitoryHygieneRecords({...filters,inspectionTypeId},!!inspectionTypeId)
  const canCreate=user?.isSuperAdmin|| (!!inspectionTypeId&&hasNavigableInspectionAction(permissions.data?.permissions,'INSPECTION_ENTER',inspectionTypeId))
  const selections=(records.data?.items??[]).filter(record=>selected.includes(record.id)&&record.canEdit)
- const optionQueries=[semesters,weeks,departments,classes]
+ const optionQueries=[semesters,weeks,departments,classes,grades]
  const optionError=optionQueries.some(query=>query.isError)
  const columns:ProColumns<PublicDormitoryHygieneRecord>[]=[
   {title:'学期',dataIndex:'semesterId',hideInTable:true,valueType:'select',fieldProps:{options:semesters.data?.items.map(item=>({value:item.id,label:item.label})),onChange:(value:string)=>{setSemester(value);form.current?.setFieldValue('weekId',undefined)},allowClear:true}},
   {title:'周次',dataIndex:'weekId',hideInTable:true,valueType:'select',fieldProps:{options:weeks.data?.items.map(item=>({value:item.id,label:item.label})),disabled:!semester,allowClear:true}},
   {title:'部门',dataIndex:'departmentId',hideInTable:true,valueType:'select',fieldProps:{options:departments.data?.items.map(item=>({value:item.id,label:item.label})),placeholder:'全部有权部门',allowClear:true}},
-  {title:'班级',dataIndex:'classId',hideInTable:true,valueType:'select',fieldProps:{options:classes.data?.items.map(item=>({value:item.id,label:item.label})),showSearch:true,optionFilterProp:'label',allowClear:true}},
+  {title:'年级',dataIndex:'grade',hideInTable:true,valueType:'select',fieldProps:{options:grades.data?.items.map(item=>({value:item.id,label:item.label})),placeholder:'全部年级',allowClear:true,onChange:(value:string)=>{setSelectedGrade(value??'');form.current?.setFieldValue('classId',undefined)}}},
+  {title:'班级',dataIndex:'classId',hideInTable:true,valueType:'select',fieldProps:{options:(selectedGrade?classes.data?.items.filter(item=>item.grade===selectedGrade):classes.data?.items)?.map(item=>({value:item.id,label:item.label})),showSearch:true,optionFilterProp:'label',allowClear:true}},
   {title:'数据状态',dataIndex:'status',valueType:'select',valueEnum:statuses,width:110},
   {title:'数据来源',dataIndex:'source',valueType:'select',valueEnum:sources,width:110},
+  {title:'关键字',dataIndex:'keyword',hideInTable:true,fieldProps:{autoComplete:'off',spellCheck:false,allowClear:true,placeholder:'输入学号或姓名…'}},
+  {title:'排序',dataIndex:'sort',hideInTable:true,valueType:'select',valueEnum:{occurredAtDesc:{text:'检查时间从新到旧'},occurredAtAsc:{text:'检查时间从旧到新'},studentNoAsc:{text:'学号升序'},studentNoDesc:{text:'学号降序'}},fieldProps:{allowClear:false}},
   {title:'公共区域（当前名称）',dataIndex:'currentAreaName',search:false,width:230},
   {title:'检查日期',key:'date',search:false,width:160,render:(_,record)=>record.details.date},
   {title:'时间/轮次',key:'occurrence',search:false,width:130,render:(_,record)=>record.details.time||record.details.round||'—'},
@@ -55,7 +60,7 @@ export function PublicDormitoryHygienePage() {
  {optionError&&<Alert type="error" title="筛选选项加载失败，请重试。" action={<Button onClick={()=>optionQueries.forEach(query=>{if(query.isError)void query.refetch()})}>重试</Button>}/>}
  <ProTable<PublicDormitoryHygieneRecord> className="attendance-records-table" cardBordered rowKey="id" columns={columns} dataSource={records.isError?[]:records.data?.items??[]} loading={records.isLoading||semesters.isLoading}
  headerTitle={<Space size={10}><span>公共宿舍卫生记录</span><Tag color="blue">共 {records.data?.total??0} 条</Tag></Space>}
- formRef={form} search={{labelWidth:'auto',defaultCollapsed:false}} options={{reload:()=>void records.refetch(),density:true,setting:true}} onSubmit={values=>{setFilters({...values,page:1,pageSize:filters.pageSize});setSelected([])}} onReset={()=>{setSemester(undefined);setFilters({page:1,pageSize:20});setSelected([])}}
+ formRef={form} form={{initialValues:{sort:'occurredAtDesc'}}} search={{labelWidth:'auto',defaultCollapsed:false}} options={{reload:()=>void records.refetch(),density:true,setting:true}} onSubmit={values=>{setFilters({...values,page:1,pageSize:filters.pageSize});setSelected([])}} onReset={()=>{setSemester(undefined);setSelectedGrade('');setFilters({page:1,pageSize:20,sort:'occurredAtDesc'});setSelected([])}}
  scroll={{x:1700}} pagination={{current:Number(filters.page),pageSize:Number(filters.pageSize),total:records.data?.total??0,showSizeChanger:true,showQuickJumper:true,showTotal:total=>`共 ${total} 条`,onChange:(page,pageSize)=>{setFilters(value=>({...value,page,pageSize}));setSelected([])}}}
  rowSelection={{selectedRowKeys:selected,onChange:setSelected,getCheckboxProps:record=>({disabled:!record.canEdit})}}
  locale={{emptyText:records.isError?<Alert type="error" title="记录加载失败，请重试。" action={<Button onClick={()=>void records.refetch()}>重试</Button>}/>:optionError?'请先恢复筛选选项加载':<Empty description="当前范围暂无公共宿舍卫生记录"/>}}

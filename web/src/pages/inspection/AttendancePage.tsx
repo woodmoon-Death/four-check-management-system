@@ -1,7 +1,7 @@
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons'
-import { ProTable, type ProColumns } from '@ant-design/pro-components'
+import { ProTable, type ProColumns, type ProFormInstance } from '@ant-design/pro-components'
 import { Alert, Button, Empty, Space, Tag, Typography } from 'antd'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../app/providers/authContext'
 import type { AttendanceFilters, AttendanceRecord, InspectionContext } from '../../entities/inspection/model/inspection'
@@ -57,6 +57,8 @@ export function AttendancePage() {
   const [deleting, setDeleting] = useState<AttendanceRecord[]>([])
   const [selection, setSelection] = useState<AttendanceRecord[]>([])
 	const [drawerOpen, setDrawerOpen] = useState(() => Boolean(importBatchId))
+	const formRef = useRef<ProFormInstance>(undefined)
+	const [selectedGrade, setSelectedGrade] = useState<string>(() => search.get('grade') ?? '')
 	const permissions = useAttendancePermissions()
 	const currentWeek = useCurrentAcademicWeek()
 	const filterOptions = useAttendanceFilterOptions()
@@ -135,6 +137,13 @@ export function AttendancePage() {
 		source: filters.source,
 		sort: filters.sort,
 	}
+
+	const handleValuesChange = (changed: Partial<AttendanceSearchValues>) => {
+		if (!('grade' in changed)) return
+		setSelectedGrade(changed.grade ?? '')
+		// 年级变化后，已选班级可能不再属于该年级，清空班级选择。
+		formRef.current?.setFieldsValue({ classId: undefined })
+	}
 	const columns = useMemo<ProColumns<AttendanceRecord>[]>(() => {
 		const semesterName = (id: string) => options?.semesters.find(item => item.id === id)?.name ?? '未知学期'
 		const result: ProColumns<AttendanceRecord>[] = [
@@ -145,8 +154,8 @@ export function AttendancePage() {
 			result.push({ title: '部门', dataIndex: 'departmentId', hideInTable: true, order: 7, valueType: 'select', fieldProps: { options: options?.departments.map(item => ({ value: item.id, label: item.name })) ?? [], placeholder: '全部有权部门', allowClear: true, showSearch: true, optionFilterProp: 'label' } })
 		}
 		result.push(
-			{ title: '班级', dataIndex: 'classId', hideInTable: true, order: 6, valueType: 'select', fieldProps: { options: options?.classes.map(item => ({ value: item.id, label: item.name })) ?? [], placeholder: '全部班级', allowClear: true, showSearch: true, optionFilterProp: 'label' } },
-			{ title: '年级', dataIndex: 'grade', hideInTable: true, order: 5, valueType: 'select', fieldProps: { options: options?.grades.map(item => ({ value: item, label: gradeLabel(item) })) ?? [], placeholder: '全部年级', allowClear: true } },
+			{ title: '年级', dataIndex: 'grade', hideInTable: true, order: 6, valueType: 'select', fieldProps: { options: options?.grades.map(item => ({ value: item, label: gradeLabel(item) })) ?? [], placeholder: '全部年级', allowClear: true } },
+			{ title: '班级', dataIndex: 'classId', hideInTable: true, order: 5, valueType: 'select', fieldProps: { options: (selectedGrade ? options?.classes.filter(item => item.grade === selectedGrade) : options?.classes)?.map(item => ({ value: item.id, label: item.name })) ?? [], placeholder: '全部班级', allowClear: true, showSearch: true, optionFilterProp: 'label' } },
 			{ title: '数据状态', dataIndex: 'status', hideInTable: true, order: 4, valueType: 'select', valueEnum: Object.fromEntries(Object.entries(statusLabels).map(([value, text]) => [value, { text }])), fieldProps: { placeholder: '全部状态', allowClear: true } },
 			{ title: '数据来源', dataIndex: 'source', hideInTable: true, order: 3, valueType: 'select', valueEnum: Object.fromEntries(Object.entries(sourceLabels).map(([value, text]) => [value, { text }])), fieldProps: { placeholder: '全部来源', allowClear: true } },
 			{ title: '关键字', dataIndex: 'keyword', hideInTable: true, order: 2, fieldProps: { autoComplete: 'off', spellCheck: false, allowClear: true, placeholder: '输入学号或姓名…' } },
@@ -165,7 +174,7 @@ export function AttendancePage() {
 			{ title: '数据状态', dataIndex: 'status', width: 110, search: false, render: (_, record) => <Tag color={record.status === 'CONFIRMED' ? 'green' : record.status === 'RETURNED' ? 'red' : 'blue'}>{statusLabels[record.status as keyof typeof statusLabels] ?? record.status}</Tag> },
 		)
 		return result
-	}, [options, showDepartmentFilter])
+	}, [options, showDepartmentFilter, selectedGrade])
 
 	const updateImportBatchId = (batchId?: string) => {
 		navigate(`${location.pathname}${location.search}`, { replace: true, state: { ...(location.state ?? {}), importBatchId: batchId } })
@@ -192,9 +201,10 @@ export function AttendancePage() {
 			dataSource={listReady && !records.isError ? records.data?.items ?? [] : []}
 			headerTitle={<Space size={10}><span>到课率记录</span><Tag color="blue">共 {records.data?.total ?? 0} 条</Tag></Space>}
 			search={{ labelWidth: 'auto', defaultCollapsed: false }}
-			form={{ initialValues: searchValues }}
+			formRef={formRef}
+			form={{ initialValues: searchValues, onValuesChange: handleValuesChange }}
 			onSubmit={values => replaceSearch({ ...searchValues, ...values })}
-			onReset={() => replaceSearch({ semesterId, weekId, sort: 'occurredAtDesc' })}
+			onReset={() => { setSelectedGrade(''); replaceSearch({ semesterId, weekId, sort: 'occurredAtDesc' }) }}
 			options={{ reload: () => void records.refetch(), density: true, setting: true }}
 			toolBarRender={() => [...(canImport ? [<Button key="manual" icon={<PlusOutlined aria-hidden />} disabled={!options} onClick={() => setManualOpen(true)}>新增记录</Button>, <Button key="import" type="primary" icon={<UploadOutlined aria-hidden />} disabled={!listReady} onClick={() => setDrawerOpen(true)} aria-label="批量导入到课率">批量导入</Button>] : []), <DepartmentSubmissionActions key="submissions" inspectionTypeId={attendanceTypeId} listScope={context} selected={selectedDrafts} canReview={canReview} onChanged={() => { setSelection([]); void records.refetch() }} onOpenRecord={(id) => setEditId(id)} />, ...(selectedDrafts.length ? [<Button key="delete" danger onClick={() => setDeleting(selected.filter(item => item.status === 'DRAFT'))}>批量删除（{selectedDrafts.length}）</Button>] : [])]}
 			pagination={{ current: page, pageSize, total: records.data?.total ?? 0, showSizeChanger: true, showQuickJumper: true, showTotal: total => `共 ${total} 条`, onChange: (nextPage, nextPageSize) => replaceSearch(searchValues, nextPage, nextPageSize) }}

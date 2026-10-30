@@ -23,6 +23,7 @@ export function LateReturnPage() {
  const [importing,setImporting]=useState(!!importBatchId)
  const setImportBatchId=(id?:string)=>navigate(location.pathname+location.search,{replace:true,state:{...location.state,importBatchId:id}})
  const form=useRef<ProFormInstance>(undefined)
+ const [selectedGrade,setSelectedGrade]=useState('')
  const [creating,setCreating]=useState(false)
  const [panel,setPanel]=useState<{id:string;mode:'detail'|'edit'}>()
  const [deleting,setDeleting]=useState<LateReturnRecord[]>([])
@@ -34,20 +35,24 @@ export function LateReturnPage() {
  const {semesterId,update:saveFilters,setDraftSemester}=scope
  const departments=useInspectionContext({purpose:'view',kind:'departments'})
  const classes=useInspectionContext({purpose:'view',kind:'classes'})
+ const grades=useInspectionContext({purpose:'view',kind:'grades'})
  const inspectionTypeId=semesters.data?.inspectionTypeId
  const records=useLateReturnRecords({...filters,inspectionTypeId},!!inspectionTypeId&&!scope.currentWeek.isLoading&&!scope.currentWeek.isError&&!invalidSelection)
  const canCreate=user?.isSuperAdmin|| (!!inspectionTypeId&&(user?.systemRole!=='MEMBER'||!!user.primaryDepartmentId)&&hasNavigableInspectionAction(permissions.data?.permissions,'INSPECTION_ENTER',inspectionTypeId))
  const selections=(records.data?.items??[]).filter(record=>selected.includes(record.id)&&record.canEdit&&record.status==='DRAFT')
  const canReview=!!user?.isSuperAdmin|| (!!inspectionTypeId&&hasNavigableInspectionAction(permissions.data?.permissions,'INSPECTION_REVIEW',inspectionTypeId))
- const optionQueries=[scope.currentWeek,semesters,weeks,departments,classes]
+ const optionQueries=[scope.currentWeek,semesters,weeks,departments,classes,grades]
  const optionError=optionQueries.some(query=>query.isError)
  const columns:ProColumns<LateReturnRecord>[]=[
   {title:'学期',dataIndex:'semesterId',hideInTable:true,valueType:'select',fieldProps:{options:semesters.data?.items.map(item=>({value:item.id,label:item.label})),onChange:(value:string)=>{setDraftSemester(value??'');form.current?.setFieldValue('weekId',undefined)},allowClear:true}},
   {title:'周次',dataIndex:'weekId',hideInTable:true,valueType:'select',fieldProps:{options:weeks.data?.items.map(item=>({value:item.id,label:item.label})),disabled:!scope.optionSemesterId,allowClear:true}},
   {title:'部门',dataIndex:'departmentId',hideInTable:true,valueType:'select',fieldProps:{options:departments.data?.items.map(item=>({value:item.id,label:item.label})),placeholder:'全部有权部门',allowClear:true}},
-  {title:'班级',dataIndex:'classId',hideInTable:true,valueType:'select',fieldProps:{options:classes.data?.items.map(item=>({value:item.id,label:item.label})),showSearch:true,optionFilterProp:'label',allowClear:true}},
+  {title:'年级',dataIndex:'grade',hideInTable:true,valueType:'select',fieldProps:{options:grades.data?.items.map(item=>({value:item.id,label:item.label})),placeholder:'全部年级',allowClear:true,onChange:(value:string)=>{setSelectedGrade(value??'');form.current?.setFieldValue('classId',undefined)}}},
+  {title:'班级',dataIndex:'classId',hideInTable:true,valueType:'select',fieldProps:{options:(selectedGrade?classes.data?.items.filter(item=>item.grade===selectedGrade):classes.data?.items)?.map(item=>({value:item.id,label:item.label})),showSearch:true,optionFilterProp:'label',allowClear:true}},
   {title:'数据状态',dataIndex:'status',valueType:'select',valueEnum:statuses,width:110},
   {title:'数据来源',dataIndex:'source',valueType:'select',valueEnum:sources,width:110},
+  {title:'关键字',dataIndex:'keyword',hideInTable:true,fieldProps:{autoComplete:'off',spellCheck:false,allowClear:true,placeholder:'输入学号或姓名…'}},
+  {title:'排序',dataIndex:'sort',hideInTable:true,valueType:'select',valueEnum:{occurredAtDesc:{text:'检查时间从新到旧'},occurredAtAsc:{text:'检查时间从旧到新'},studentNoAsc:{text:'学号升序'},studentNoDesc:{text:'学号降序'}},fieldProps:{allowClear:false}},
   {title:'学号',dataIndex:'studentNumber',search:false,width:140},
   {title:'姓名',dataIndex:'studentName',search:false,width:120},
   {title:'班级',dataIndex:'className',search:false,width:150},
@@ -64,7 +69,7 @@ export function LateReturnPage() {
  {optionError&&<Alert type="error" title="筛选选项加载失败，请重试。" action={<Button onClick={()=>optionQueries.forEach(query=>{if(query.isError)void query.refetch()})}>重试</Button>}/>}
  <ProTable<LateReturnRecord> className="attendance-records-table" cardBordered rowKey="id" columns={columns} dataSource={records.isError?[]:records.data?.items??[]} loading={records.isLoading||semesters.isLoading||scope.currentWeek.isLoading}
  headerTitle={<Space size={10}><span>晚归记录</span><Tag color="blue">共 {records.data?.total??0} 条</Tag></Space>}
- key={`${semesterId??''}-${weekId??''}`} formRef={form} form={{initialValues:filters}} search={{labelWidth:'auto',defaultCollapsed:false}} options={{reload:()=>void records.refetch(),density:true,setting:true}} onSubmit={values=>{saveFilters({...values,page:1,pageSize:filters.pageSize});setSelected([])}} onReset={()=>{saveFilters({page:1,pageSize:20});setSelected([])}}
+ key={`${semesterId??''}-${weekId??''}`} formRef={form} form={{initialValues:filters}} search={{labelWidth:'auto',defaultCollapsed:false}} options={{reload:()=>void records.refetch(),density:true,setting:true}} onSubmit={values=>{saveFilters({...values,page:1,pageSize:filters.pageSize});setSelected([])}} onReset={()=>{setSelectedGrade('');saveFilters({page:1,pageSize:20});setSelected([])}}
  scroll={{x:1400}} pagination={{current:Number(filters.page),pageSize:Number(filters.pageSize),total:records.data?.total??0,showSizeChanger:true,showQuickJumper:true,showTotal:total=>`共 ${total} 条`,onChange:(page,pageSize)=>{saveFilters({...filters,page,pageSize});setSelected([])}}}
  rowSelection={{selectedRowKeys:selected,onChange:setSelected,getCheckboxProps:record=>({disabled:!record.canEdit||record.status!=='DRAFT'})}}
  locale={{emptyText:invalidSelection?'所选学期或周次不可用':records.isError?<Alert type="error" title="记录加载失败，请重试。" action={<Button onClick={()=>void records.refetch()}>重试</Button>}/>:optionError?'请先恢复筛选选项加载':<Empty description="当前范围暂无晚归记录"/>}}
